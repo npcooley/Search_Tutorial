@@ -1,0 +1,392 @@
+---
+title: "BLAST-like searchs with DECIPHER"
+author: 
+  - Nicholas P. Cooley, Department of Biomedical Informatics, University of Pittsburgh
+date: "`r Sys.Date()`"
+output:
+  github_document: default
+#   html_document: default
+knit: (function(inputFile, encoding) {
+                rmarkdown::render(inputFile,
+                                  encoding = encoding,
+                                  output_format = "all")
+        })
+always_allow_html: true
+---
+
+```{r, default chunk opts, include = FALSE}
+knitr::opts_chunk$set(fig.align = "center")
+```
+
+# A simple workflow
+
+!Currently under construction!
+
+This workflow example was inspired by a request for help from some more wet-lab oriented colleagues who needed assistance doing some data analysis. They were interested in performing what would seem to a well-entrenched computational biologist or bioinformatician as a standard BLAST-appropriate task. With the introduction of the functions `SearchIndex` and `AlignPairs` to `DECIPHER`, it is now possible to perform sequence similarity searchs in R without external dependencies. So helping these colleagues achieve their goal seemed like a good place to double dip and showcase these new functionalities.
+
+The data accessed here isn't the exact data that they used, but it's not too dissimilar. For this somewhat contrived example we're searching the proteomes for all reference archaea that have complete genomes with the training data used for the NCBI's AMRFinder tool. This task isn't too dissimilar from one that many folks may be interested in, or from how AMRFinder itself works. However the code present in this is example is a fairly unsophisticated, please keep in mind that it is a simple example meant to be accessible.
+
+## Setting your environment
+
+This document is knit together from a single Rmd file and contains code relevant to the general task and some data analysis. In this first chunk we're just performing a few simple tasks. The first is collecting the start of the script for timing purposes, the second is loading in the packages we'll be using, and the last is just a few gymnastics to ensure that the external dependency we're using to collect our data exists and R has access to it. We're using the `edirect` tools to collect data here because it allows us to collect data smoothly from the NCBI, and then discard it afterwards while leaving a trail of *what* data we collected, and not requiring us to store or maintain a mirror of said data.
+
+```{r, environment, echo = TRUE, eval = TRUE}
+timestart <- Sys.time()
+# we're only loading in one package here, because it will load in all its dependencies
+suppressMessages(library(DECIPHER))
+suppressMessages(library(htmltools))
+
+# the only other thing we're relying on is the NCBI's edirect tools, which need to be accessible in our path...
+# show the location of one of edirect's tools:
+system(command = "which esearch",
+       intern = TRUE)
+# let's ask whether it's in the path, remember, we're asking for the directory, not the tool itself
+place_holder <- Sys.getenv("PATH")
+place_holder <- strsplit(x = place_holder,
+                         split = ":",
+                         fixed = TRUE)[[1]]
+# return true if the directory is in the path
+any(grepl(pattern = gsub(pattern = "/[^/]*$",
+                         replacement = "",
+                         x = system(command = "which esearch",
+                                    intern = TRUE)),
+          x = place_holder))
+```
+
+## Getting your data
+
+In this second chunk we're starting by defining a list that contains all the user defined variables we think we'll need as the script progresses. This serves a few purposes, the first being that we can access large variables relatively easily and reliably, the second is just to improve legibility and ensure all the nobs we can or should be able to turn are up front in the script. We then pull our data down from the NCBI FTP site. A small commented out section of code near the bottom of this chunk was used to remove sequences with non-canonical or ambiguous amino acids, as a previous version of `AlignPairs` didn't handle these correctly. That has been addressed, but the code is left as an example of how one might perform QA in a similar manner.
+
+If this repo is being used a template, it's likely that this chunk is where most of your relevant changes to code will take place.
+
+```{r, args and data, eval = TRUE, echo = TRUE}
+# lets define all of our args up front, this isn't necesary, but can make our code more legible
+# and simpler to change in the long run
+
+ARGS <- list("query" = "https://ftp.ncbi.nlm.nih.gov/pathogen/Antimicrobial_resistance/AMRFinderPlus/database/latest/AMRProt.fa",
+             "subject" = "archaea",
+             "K" = 5, # 4 is more time consuming, but gives more exhaustive hits, 6 is faster but potentially misses results, 5 is a happy median, and should give results that are roughly equivalent to those 
+             "processors" = NULL,
+             "verbose" = TRUE,
+             "PID_Threshold" = 0.4, # somewhat arbitrary, this example is a little contrived, so almost any hit above random is a little unexpected/interesting/illustrative
+             "Save" = c("t02",
+                        "totaltime",
+                        # "seqs", # this is commented out because we don't need to keep this around for a toy example
+                        "query",
+                        "edirect_result"),
+             "key" = "value")
+
+# construct our edirect query
+edirect_query <- paste0("esearch -db assembly ",
+                        "-query '",
+                        ARGS$subject,
+                        "[organism] ", # target organism can be changed here
+                        'AND "complete genome"[filter] ', # only complete genomes
+                        'AND "refseq has annotation"[properties] ', # only genomes with annotations
+                        'AND "latest refseq"[filter] ', # only latest
+                        'AND "taxonomy check ok"[filter] ', # passes tax check
+                        'AND "reference genome"[filter] ',
+                        "NOT anomalous[filter]' ",
+                        '| ',
+                        'esummary ',
+                        '| ',
+                        'xtract -pattern DocumentSummary -element FtpPath_RefSeq')
+
+# run the query
+edirect_result <- system(command = edirect_query,
+                         intern = TRUE,
+                         timeout = 600)
+
+# grab our subject seqs from the ftp site
+seqs <- vector(mode = "list",
+               length = length(edirect_result))
+# send messages from download.file to a /dev/null
+# see https://stackoverflow.com/questions/66138345/how-to-suppress-download-file-trying-url-message-in-r
+# especially for the warnings in ?sink
+nullcon <- file(nullfile(), open = "wb")
+sink(nullcon, type = "message")
+for (m1 in seq_along(seqs)) {
+  seqs[[m1]] <- try(readAAStringSet(paste0(edirect_result[m1],
+                                           "/",
+                                           strsplit(x = edirect_result[m1],
+                                                    split = "/",
+                                                    fixed  = TRUE)[[1]][10],
+                                           "_protein.faa.gz")))
+  if (is(object = seqs[[m1]],
+         class2 = "AAStringSet")) {
+    names(seqs[[m1]]) <- paste(strsplit(x = edirect_result[m1],
+                                        split = "/",
+                                        fixed  = TRUE)[[1]][10],
+                               names(seqs[[m1]]))
+  }
+  
+}
+# undue the null sink
+# and nuke the connection
+sink(type = "message")
+close(nullcon)
+# subset to successfully collected seqs
+w1 <- vapply(X = seqs,
+             FUN = function(x) {
+               is(object = x,
+                  class2 = "AAStringSet")
+             },
+             FUN.VALUE = vector(mode = "logical",
+                                length = 1))
+seqs <- do.call(c,
+                seqs[w1])
+edirect_result <- edirect_result[w1]
+
+# remove sequences with ambiguity codes or non-canonical AAs
+# w1 <- alphabetFrequency(seqs)
+# w1 <- apply(X = w1,
+#             MARGIN = 1,
+#             FUN = function(x) {
+#               any(x[21:30] > 0)
+#             })
+# seqs <- seqs[!w1]
+
+query <- readAAStringSet(filepath = ARGS$query)
+```
+
+## Running your search to create an initial result
+
+Once our data is set up, the search routine is similar to BLAST style searches. You can read about the relevant functions in their man pages, `?IndexSeqs`, `?SearchIndex`, and `?AlignPairs`. Our first step is to build a database to search against, and then we just search against it with our query. We append a slight bit of extra code in between searching and aligning to enforce global alignments, but otherwise there isn't much fancy spinach to add on our own here.
+
+We end this code chunk with a slight condensation of `AlignPairs`' default results while appending a global PID and a global score to the results.
+
+```{r, search, eval = TRUE, echo = TRUE}
+i01 <- IndexSeqs(subject = seqs,
+                 K = ARGS$K,
+                 processors = ARGS$processors,
+                 verbose = ARGS$verbose)
+s01 <- SearchIndex(pattern = query,
+                   invertedIndex = i01,
+                   subject = seqs,
+                   processors = ARGS$processors,
+                   verbose = ARGS$verbose)
+# add anchors to force global alignments, hard coded values here shouldn't change
+# so we can just stick them here
+s01$Position <- mapply(SIMPLIFY = FALSE,
+                       FUN = function(x, y, z) {
+                         cbind(matrix(data = 0L,
+                                      nrow = 4L),
+                               x,
+                               matrix(data = c(y, y, z, z),
+                                      nrow = 4L))
+                       },
+                       x = s01$Position,
+                       y = width(query)[s01$Pattern] + 1L,
+                       z = width(seqs)[s01$Subject] + 1L)
+p01 <- AlignPairs(pattern = query,
+                  subject = seqs,
+                  pairs = s01,
+                  processors = ARGS$processors,
+                  verbose = ARGS$verbose)
+
+# normalize score, and grab global PIDs
+p02 <- cbind(p01[, 1:9],
+             "sco1" = p01$Score / p01$AlignmentLength,
+             "sco2" = p01$Matches / p01$AlignmentLength)
+```
+
+## Some plots
+
+A histogram of the global alignments for hits that we found. Given that this is a toy example, and the nature of our query and database, we're not expecting considerably close hits. Though we do find global alignments with measures that imply considerable shared sequence.
+
+```{r, hist01}
+#| dev = c('png', 'pdf'), fig.width = 7, fig.height = 7, fig.align = "center",
+#| 
+hist(x = p02$sco2,
+     breaks = seq(from = 0,
+                  to = 1,
+                  by = 0.01),
+     xaxs = "i",
+     yaxs = "i",
+     main = "PIDs for found matches.",
+     xlab = "PID")
+```
+
+We can present hits above a given threshold in a heatmap like plot against genome of origin to give a rough idea of where, and in what quantities and patterns we're finding hits. If this information is expanded with some kind of core alignment or phylogeny, these presence absence patterns can be plotted against a tree for phylogeny aware analysis.
+
+```{r, presence01}
+#| dev = c('png', 'pdf'), fig.width = 7, fig.height = 7, fig.align = "center",
+# hits within a selected limit
+t01 <- tapply(X = p02,
+              INDEX = p02$Pattern,
+              FUN = function(x) {
+                x[x$sco2 >= ARGS$PID_Threshold, ]
+              },
+              simplify = FALSE)
+
+# build a key for sanity's sake
+seq_key <- do.call(rbind,
+                   lapply(X = strsplit(x = names(seqs),
+                                       split = " ",
+                                       fixed = TRUE),
+                          FUN = function(x) {
+                            x[1:2]
+                          }))
+seq_key <- data.frame("assembly" = seq_key[, 1],
+                      "prot_accession" = seq_key[, 2])
+u_assemblies <- unique(seq_key$assembly)
+
+# the rownames of seq_key should now related to p02$Subject
+# and we can build a presence absence table of hits in our search to our assemblies
+hit_key <- lapply(X = t01,
+                  FUN = function(x) {
+                    table(factor(seq_key$assembly[x$Subject],
+                                 levels = u_assemblies))
+                  })
+hit_key <- do.call(rbind,
+                   hit_key)
+present_keys <- hit_key[rowSums(hit_key) > 0, ]
+
+# create an ordering vector based off the number of isolates that had
+# at least one hit for the row
+# order is ascending by default
+o1 <- order(apply(X = present_keys,
+                  MARGIN = 1,
+                  FUN = function(x) {
+                    sum(x > 0)
+                  }))
+
+colvec01 <- colorRampPalette(colors = c("sienna", "violet"))(max(present_keys))
+par(mar = c(2.5, 2.5, 1.5, 5),
+    mgp = c(1, .5, 0))
+plot(x = 0,
+     y = 0,
+     xlim = c(0, ncol(present_keys)),
+     ylim = c(0, nrow(present_keys)),
+     type = "n",
+     xlab = "assembly",
+     ylab = "query",
+     main = "counts above PID threshold",
+     xaxs = "i",
+     yaxs = "i",
+     xaxt = "n",
+     yaxt = "n",
+     frame.plot = TRUE)
+for (m1 in seq_along(o1)) {
+  w1 <- which(present_keys[o1[m1], ] > 0)
+  if (length(w1) > 0) {
+    rect(xleft = w1 - 1L,
+         xright = w1,
+         ytop = rep(m1, length(w1)),
+         ybottom = rep(m1 - 1, length(w1)),
+         col = colvec01[present_keys[o1[m1], w1]],
+         border = NA)
+  }
+}
+legend(x = ncol(present_keys) + (ncol(present_keys) * 0.05),
+       y = nrow(present_keys) * 0.85,
+       legend = seq(max(present_keys)),
+       col = colvec01,
+       pch = 15,
+       pt.cex = 2,
+       xpd = TRUE)
+```
+
+Both `Biostrings` and `DECIPHER` have nice tools for sequence visualization following analysis, however making plots with, or displaying alignments isn't always the simplest or most informative task. One option shown here is using html to display your alignment in a tidy way for viewing in a web browser.
+
+```{r, display alignments}
+# get some rough descriptions of groups captured by our queries
+# mean alignment of query to subject
+ph1 <- vapply(X = t01,
+              FUN = function(x) {
+                mean(x$sco2)
+              },
+              FUN.VALUE = vector(mode = "numeric",
+                                 length = 1L))
+# total number of found subjects
+ph2 <- vapply(X = t01,
+              FUN = function(x) {
+                nrow(x)
+              },
+              FUN.VALUE = vector(mode = "integer",
+                                 length = 1L))
+
+# just grab the first group with a mean PID great than .5 and 10 or more found subjects
+w1 <- unname(which(ph1 >= 0.5 & ph2 >= 10))
+w2 <- c(query[w1[1]],
+        seqs[t01[[w1[1]]]$Subject])
+
+# align them
+# turn verbose off because this prints out a bunch of progress bars
+w3 <- AlignSeqs(w2, verbose = FALSE)
+
+# if there are a whole bunch lets just look at 10 random ones
+if (length(w3) > 10) {
+  set.seed(1986)
+  w3 <- w3[sample(x = length(w3),
+                  size = 10,
+                  replace = FALSE)]
+}
+
+# create a placeholder temporary file
+tmp01 <- tempfile(fileext = "html")
+
+# toss the alignment view into it
+BrowseSeqs(myXStringSet = w3,
+           htmlFile = tmp01,
+           openURL = FALSE)
+
+# read it into R
+htmllines <- readLines(tmp01)
+# <pre> block starts at the 3rd entry and ends at end
+for (m1 in 4:length(htmllines)) {
+  htmllines[m1] <- paste0(htmllines[m1], '<br>')
+}
+# display it with the knitr engine
+HTML(htmllines)
+
+```
+
+## Save your data for later evaluation
+
+```{r, script end, eval = TRUE, echo = TRUE}
+
+# compress our saved results into a minimal unit
+# because we're saving off the query as well and the list positions will retain their names
+# we can nuke most of the columns in t01, and return only the subject name and the global pid and global score
+t02 <- lapply(X = t01,
+              FUN = function(x) {
+                if (nrow(x) > 0) {
+                  x$Subject <- seq_key$prot_accession[x$Subject]
+                  x <- x[, c(4,10,11)]
+                }
+                return(x)
+              })
+
+timeend <- Sys.time()
+totaltime <- timeend - timestart
+print(totaltime)
+print(length(query))
+print(length(seqs))
+
+save(list = ARGS$Save,
+     file = "Result.RData",
+     compress = "xz")
+
+GeneratedData <- list.files(recursive = TRUE)
+if (file.exists(".gitignore")) {
+  CurrentGitIgnore <- readLines(".gitignore")
+} else {
+  CurrentGitIgnore <- ""
+}
+
+# look through the generated files and add anything that's too large for github to the .gitignore
+for (m1 in seq_along(GeneratedData)) {
+  
+  if (file.info(GeneratedData[m1])$size >= 25000000 &
+      !(GeneratedData[m1] %in% CurrentGitIgnore)) {
+    cat(paste0(GeneratedData[m1],
+               "\n"),
+        file = ".gitignore",
+        append = TRUE)
+  }
+}
+
+sessionInfo()
+```
+
