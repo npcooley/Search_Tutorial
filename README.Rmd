@@ -1,5 +1,5 @@
 ---
-title: "BLAST-like searchs with DECIPHER"
+title: "BLAST-like searches with DECIPHER"
 author: 
   - Nicholas P. Cooley, Department of Biomedical Informatics, University of Pittsburgh
 date: "`r Sys.Date()`"
@@ -22,13 +22,15 @@ knitr::opts_chunk$set(fig.align = "center")
 
 !Currently under construction!
 
-This workflow example was inspired by a request for help from some more wet-lab oriented colleagues who needed assistance doing some data analysis. They were interested in performing what would seem to a well-entrenched computational biologist or bioinformatician as a standard BLAST-appropriate task. With the introduction of the functions `SearchIndex` and `AlignPairs` to `DECIPHER`, it is now possible to perform sequence similarity searchs in R without external dependencies. So helping these colleagues achieve their goal seemed like a good place to double dip and showcase these new functionalities.
+This workflow example was inspired by a request for help from some more wet-lab oriented colleagues who needed assistance doing some data analysis. They were interested in performing what would seem to a well-entrenched computational biologist or bioinformatician as a standard BLAST-appropriate task. With the introduction of the functions `SearchIndex` and `AlignPairs` to `DECIPHER`, it is now possible to perform sequence similarity searches in R without external dependencies. So helping these colleagues achieve their goal seemed like a good place to double dip and showcase these new functionalities.
 
-The data accessed here isn't the exact data that they used, but it's not too dissimilar. For this somewhat contrived example we're searching the proteomes for all reference archaea that have complete genomes with the training data used for the NCBI's AMRFinder tool. This task isn't too dissimilar from one that many folks may be interested in, or from how AMRFinder itself works. However the code present in this is example is a fairly unsophisticated, please keep in mind that it is a simple example meant to be accessible.
+There are plenty of reasons to chose alternative search strategies in bioinformatics, and this tutorial isn't making any value judgements about strategies generally.
+
+The data accessed here isn't the exact data that my colleagues used, but it's similar enough. For this somewhat contrived example we're searching the proteomes for all reference archaea that have complete genomes with the training data used for the NCBI's AMRFinder tool. This task isn't too dissimilar from one that many folks may be interested in, or from how AMRFinder itself works. However the code present in this example is fairly unsophisticated, please keep in mind that it is a simple example meant to be accessible.
 
 ## Setting your environment
 
-This document is knit together from a single Rmd file and contains code relevant to the general task and some data analysis. In this first chunk we're just performing a few simple tasks. The first is collecting the start of the script for timing purposes, the second is loading in the packages we'll be using, and the last is just a few gymnastics to ensure that the external dependency we're using to collect our data exists and R has access to it. We're using the `edirect` tools to collect data here because it allows us to collect data smoothly from the NCBI, and then discard it afterwards while leaving a trail of *what* data we collected, and not requiring us to store or maintain a mirror of said data.
+This document is knit together from a single Rmd file and contains code relevant to the general task and some simple plots. In this first chunk we're just performing a few simple tasks. The first is collecting the start of the script for timing purposes, the second is loading in the packages we'll be using, and the last is just a few gymnastics to ensure that the external dependency we're using to collect our data exists and R has access to it. We're using the `edirect` tools to collect data here because it allows us to collect data smoothly from the NCBI, and then discard it afterwards while leaving a trail of *what* data we collected, and not requiring us to store or maintain a mirror of said data.
 
 ```{r, environment, echo = TRUE, eval = TRUE}
 timestart <- Sys.time()
@@ -55,9 +57,9 @@ any(grepl(pattern = gsub(pattern = "/[^/]*$",
 
 ## Getting your data
 
-In this second chunk we're starting by defining a list that contains all the user defined variables we think we'll need as the script progresses. This serves a few purposes, the first being that we can access large variables relatively easily and reliably, the second is just to improve legibility and ensure all the nobs we can or should be able to turn are up front in the script. We then pull our data down from the NCBI FTP site. A small commented out section of code near the bottom of this chunk was used to remove sequences with non-canonical or ambiguous amino acids, as a previous version of `AlignPairs` didn't handle these correctly. That has been addressed, but the code is left as an example of how one might perform QA in a similar manner.
+In this second chunk we're starting by defining a list that contains all the user defined variables we think we'll need as the script progresses. This serves a few purposes, the first being that we can access large variables relatively easily and reliably, the second is just to improve legibility and ensure that the nobs we can or should be able to turn are up front in the script. We then pull our data down from the NCBI FTP site, some spinach is present in this process to improve legibility. A small commented out section of code near the bottom of this chunk was used to remove sequences with non-canonical or ambiguous amino acids, as a previous version of `AlignPairs` didn't handle these correctly. That has been addressed, but the code is left as an example of how one might perform QA/QC in a similar manner.
 
-If this repo is being used a template, it's likely that this chunk is where most of your relevant changes to code will take place.
+If this repo is being used a template, it is likely that this chunk is where most of your relevant changes to code will take place as your data in particular will likely be specific to your needs or interests.
 
 ```{r, args and data, eval = TRUE, echo = TRUE}
 # lets define all of our args up front, this isn't necesary, but can make our code more legible
@@ -65,7 +67,7 @@ If this repo is being used a template, it's likely that this chunk is where most
 
 ARGS <- list("query" = "https://ftp.ncbi.nlm.nih.gov/pathogen/Antimicrobial_resistance/AMRFinderPlus/database/latest/AMRProt.fa",
              "subject" = "archaea",
-             "K" = 5, # 4 is more time consuming, but gives more exhaustive hits, 6 is faster but potentially misses results, 5 is a happy median, and should give results that are roughly equivalent to those 
+             "K" = 5, # 4 is more time consuming, but gives more exhaustive hits, 6 is faster but potentially misses results, 5 is a happy median, and should give results that are roughly equivalent to blast
              "processors" = NULL,
              "verbose" = TRUE,
              "PID_Threshold" = 0.4, # somewhat arbitrary, this example is a little contrived, so almost any hit above random is a little unexpected/interesting/illustrative
@@ -287,7 +289,7 @@ legend(x = ncol(present_keys) + (ncol(present_keys) * 0.05),
        xpd = TRUE)
 ```
 
-Both `Biostrings` and `DECIPHER` have nice tools for sequence visualization following analysis, however making plots with, or displaying alignments isn't always the simplest or most informative task. One option shown here is using html to display your alignment in a tidy way for viewing in a web browser.
+Both `Biostrings` and `DECIPHER` have nice tools for sequence visualization following analysis, however making plots with, or displaying alignments isn't always the simplest or most informative task. One option shown here is using html to display your alignment in a tidy way for viewing in a web browser. The github engine doesn't exactly display html as intended, but the generated alignment is included for viewing separately.
 
 ```{r, display alignments}
 # get some rough descriptions of groups captured by our queries
@@ -318,13 +320,15 @@ w3 <- AlignSeqs(w2, verbose = FALSE)
 # if there are a whole bunch lets just look at 10 random ones
 if (length(w3) > 10) {
   set.seed(1986)
-  w3 <- w3[sample(x = length(w3),
-                  size = 10,
-                  replace = FALSE)]
+  w3 <- w3[c(1,
+             sample(x = 2:length(w3),
+                    size = 9,
+                    replace = FALSE))]
 }
 
 # create a placeholder temporary file
-tmp01 <- tempfile(fileext = "html")
+tmp01 <- "alignment.html"
+file.create(tmp01)
 
 # toss the alignment view into it
 BrowseSeqs(myXStringSet = w3,
@@ -333,11 +337,16 @@ BrowseSeqs(myXStringSet = w3,
 
 # read it into R
 htmllines <- readLines(tmp01)
-# <pre> block starts at the 3rd entry and ends at end
-for (m1 in 4:length(htmllines)) {
+# we need to drop some of the style things because github md doesn't white list them
+for (m1 in 5:length(htmllines)) {
   htmllines[m1] <- paste0(htmllines[m1], '<br>')
 }
 # display it with the knitr engine
+# this document is being displayed through the github md engine so it has a few quirks
+# when it comes to displaying html, see:
+# https://stackoverflow.com/questions/14951321/how-to-display-html-content-in-github-readme-md
+# the alignment with all it's intended coloring and formatting can be viewed separately in its html file:
+# alignment.html
 HTML(htmllines)
 
 ```
@@ -345,7 +354,6 @@ HTML(htmllines)
 ## Save your data for later evaluation
 
 ```{r, script end, eval = TRUE, echo = TRUE}
-
 # compress our saved results into a minimal unit
 # because we're saving off the query as well and the list positions will retain their names
 # we can nuke most of the columns in t01, and return only the subject name and the global pid and global score
