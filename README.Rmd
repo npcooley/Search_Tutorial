@@ -337,9 +337,11 @@ BrowseSeqs(myXStringSet = w3,
 
 # read it into R
 htmllines <- readLines(tmp01)
-# we need to drop some of the style things because github md doesn't white list them
-for (m1 in 5:length(htmllines)) {
-  htmllines[m1] <- paste0(htmllines[m1], '<br>')
+displaylines <- vector(mode = "character",
+                       length = length(htmllines) - 5L)
+# we need to drop some of the style things because github md doesn't support all html headers
+for (m1 in seq_along(displaylines)) {
+  displaylines[m1] <- paste0(htmllines[m1 + 5L], '<br>')
 }
 # display it with the knitr engine
 # this document is being displayed through the github md engine so it has a few quirks
@@ -347,7 +349,7 @@ for (m1 in 5:length(htmllines)) {
 # https://stackoverflow.com/questions/14951321/how-to-display-html-content-in-github-readme-md
 # the alignment with all it's intended coloring and formatting can be viewed separately in its html file:
 # alignment.html
-HTML(htmllines)
+HTML(displaylines)
 
 ```
 
